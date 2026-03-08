@@ -1,0 +1,77 @@
+service: whatsapp-ai-webhook
+
+frameworkVersion: '3'
+useDotenv: true
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  stage: ${opt:stage, 'dev'}
+  region: ap-southeast-1
+  timeout: 30
+  memorySize: 256
+  environment:
+    WHATSAPP_ACCESS_TOKEN: ${env:WHATSAPP_ACCESS_TOKEN}
+    WHATSAPP_VERIFY_TOKEN: ${env:WHATSAPP_VERIFY_TOKEN}
+    WHATSAPP_PHONE_NUMBER_ID: ${env:WHATSAPP_PHONE_NUMBER_ID}
+    BUSINESS_HOURS_START: ${env:BUSINESS_HOURS_START, '09:00'}
+    BUSINESS_HOURS_END: ${env:BUSINESS_HOURS_END, '18:00'}
+    BUSINESS_TIMEZONE: ${env:BUSINESS_TIMEZONE, 'Asia/Singapore'}
+    ENABLE_HUMAN_HANDOFF: ${env:ENABLE_HUMAN_HANDOFF, 'true'}
+    HANDOFF_KEYWORDS: ${env:HANDOFF_KEYWORDS, 'human,agent,support'}
+
+functions:
+  whatsappWebhook:
+    handler: src/index.handler
+    events:
+      - http:
+          path: /webhook
+          method: get
+          cors: true
+      - http:
+          path: /webhook
+          method: post
+          cors: true
+    layers:
+      - arn:aws:lambda:ap-southeast-1:553035198032:layer:git-lambda2:8
+
+plugins:
+  - serverless-offline
+  - serverless-dotenv-plugin
+
+custom:
+  serverless-offline:
+    httpPort: 3000
+
+resources:
+  Resources:
+    # CloudWatch Log Group
+    WhatsappWebhookLogGroup:
+      Type: AWS::Logs::LogGroup
+      Properties:
+        LogGroupName: /aws/lambda/${self:service}-${self:provider.stage}-whatsappWebhook
+        RetentionInDays: 14
+    
+    # IAM Role for Lambda
+    LambdaExecutionRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: lambda.amazonaws.com
+              Action: sts:AssumeRole
+        PolicyArns:
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        Policies:
+          - PolicyName: WhatsappWebhookPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - logs:CreateLogStream
+                    - logs:PutLogEvents
+                  Resource: !GetAtt WhatsappWebhookLogGroup.Arn
