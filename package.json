@@ -11,9 +11,7 @@
     "logs": "serverless logs --function whatsappWebhook --region ap-southeast-1",
     "test": "jest",
     "lint": "eslint src/",
-    "format": "prettier --write src/",
-    "setup-github": "./setup-github-secrets.sh",
-    "setup-github-win": "powershell -ExecutionPolicy Bypass -File setup-github-secrets.ps1"
+    "format": "prettier --write src/"
   },
   "keywords": [
     "whatsapp",

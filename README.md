@@ -80,47 +80,24 @@ ACKNOWLEDGMENT_MESSAGE=Thank you for your message! We have received it and will 
 
 ### 4. Deploy to AWS Lambda
 
-#### Option A: GitHub Actions (Recommended)
+The project includes a GitHub Actions workflow that automatically packages and deploys to AWS Lambda when you push to the main branch.
 
-**Automated deployment with every push to main branch:**
+**Setup GitHub secrets in your repository (`Settings > Secrets and variables > Actions`):**
 
-1. **Setup GitHub secrets:**
-```bash
-./setup-github-secrets.sh
-```
+| Secret Name | Description |
+|-------------|-------------|
+| `AWS_ACCESS_KEY_ID` | AWS Access Key for deployment |
+| `AWS_SECRET_ACCESS_KEY` | AWS Secret Key for deployment |
+| `LAMBDA_FUNCTION_NAME` | Lambda function name to update |
 
-2. **Push to GitHub:**
+**Deploy:**
 ```bash
 git add .
-git commit -m "Deploy WhatsApp webhook"
+git commit -m "Deploy webhook"
 git push origin main
 ```
 
-3. **GitHub Actions will automatically:**
-   - Run tests and linting
-   - Deploy to AWS Lambda
-   - Provide the webhook URL in the action output
-
-#### Option B: Manual Deployment
-
-**For local deployment or custom setups:**
-
-**Using the Deployment Script (Recommended):**
-**For macOS/Linux:**
-```bash
-./deploy.sh
-```
-
-**For Windows (PowerShell):**
-```powershell
-.\deploy.ps1
-```
-
-**Manual Deployment:**
-
-```bash
-npm run deploy
-```
+GitHub Actions will automatically package and deploy the function.
 
 ## 🔧 Configuration
 
@@ -149,9 +126,22 @@ npm run deploy
 
 ### Automatic Deployment
 
-The project includes a GitHub Actions workflow that automatically deploys to AWS Lambda when you push to the main branch.
+The project includes a simple GitHub Actions workflow that automatically packages and deploys to AWS Lambda when you push to the main branch.
 
 #### Required GitHub Secrets
+
+**Prerequisites:** Create a Lambda function in AWS first with Node.js 18.x runtime.
+
+**Quick Lambda setup:**
+```bash
+aws lambda create-function \
+  --function-name whatsapp-webhook \
+  --runtime nodejs18.x \
+  --role arn:aws:iam::YOUR_ACCOUNT:role/lambda-execution-role \
+  --handler src/index.handler \
+  --zip-file fileb://initial.zip \
+  --region ap-southeast-1
+```
 
 Set these secrets in your GitHub repository (`Settings > Secrets and variables > Actions`):
 
@@ -159,6 +149,7 @@ Set these secrets in your GitHub repository (`Settings > Secrets and variables >
 |-------------|-------------|----------|
 | `AWS_ACCESS_KEY_ID` | AWS Access Key for deployment | ✅ |
 | `AWS_SECRET_ACCESS_KEY` | AWS Secret Key for deployment | ✅ |
+| `LAMBDA_FUNCTION_NAME` | Lambda function name to update | ✅ |
 | `WHATSAPP_ACCESS_TOKEN` | WhatsApp Business API token | ✅ |
 | `WHATSAPP_VERIFY_TOKEN` | Webhook verification token | ✅ |
 | `WHATSAPP_PHONE_NUMBER_ID` | WhatsApp phone number ID | ✅ |
@@ -166,38 +157,9 @@ Set these secrets in your GitHub repository (`Settings > Secrets and variables >
 | `BUSINESS_HOURS_START` | Business hours start (09:00) | ❌ |
 | `BUSINESS_HOURS_END` | Business hours end (18:00) | ❌ |
 
-#### Easy Setup
 
-Use the included script to set all secrets at once:
 
-**macOS/Linux:**
-```bash
-./setup-github-secrets.sh
-# or
-npm run setup-github
-```
 
-**Windows:**
-```powershell
-.\setup-github-secrets.ps1
-# or
-npm run setup-github-win
-```
-
-This script will:
-- Check GitHub CLI authentication
-- Prompt for all required and optional values
-- Set secrets in your GitHub repository
-- Guide you through the deployment process
-
-#### Workflow Features
-
-- ✅ **Automatic testing** before deployment
-- ✅ **Code linting** to ensure quality
-- ✅ **Environment validation**
-- ✅ **Deployment to ap-southeast-1 region**
-- ✅ **Pull request testing** (test-only, no deployment)
-- ✅ **Manual deployment trigger** via GitHub UI
 
 ## 🔗 WhatsApp Business API Integration
 
@@ -245,16 +207,6 @@ ACKNOWLEDGMENT_MESSAGE=Thank you for contacting us! We have received your messag
 ```bash
 # Real-time logs
 npm run logs
-
-# Or using deployment script
-./deploy.sh logs
-```
-
-### Test Webhook
-
-```bash
-# Test webhook verification
-./deploy.sh test
 ```
 
 ### Health Check
@@ -329,10 +281,6 @@ whatsapp-ai-webhook/
 │   └── message-logging.test.js # Message logging tests
 ├── docs/
 │   └── github-badge.md       # GitHub Actions badge setup
-├── deploy.sh                 # Deployment script (Unix)
-├── deploy.ps1                # Deployment script (Windows)
-├── setup-github-secrets.sh   # GitHub secrets setup (Unix)
-├── setup-github-secrets.ps1  # GitHub secrets setup (Windows)
 ├── serverless.yml            # Serverless configuration
 ├── package.json              # Dependencies and scripts
 ├── .env.example              # Environment variables template
@@ -380,12 +328,6 @@ npm update
 npm audit fix
 ```
 
-### Redeployment
-
-```bash
-./deploy.sh deploy
-```
-
 ### Rollback
 
 ```bash
@@ -419,13 +361,9 @@ For support and questions:
 
 **Option 1 - GitHub Actions (Recommended):**
 1. `npm install`
-2. `npm run setup-github` (macOS/Linux) or `npm run setup-github-win` (Windows)
-3. `git push origin main` (auto-deploy)
-
-**Option 2 - Manual Deployment:**
-1. `npm install`
-2. Configure `.env` file
-3. `./deploy.sh`
-4. Configure WhatsApp webhook with the provided URL
+**Deployment:**
+1. Configure GitHub secrets (AWS credentials and Lambda function name)
+2. `git push origin main` (auto-deploy)
+3. Configure WhatsApp webhook with the provided Lambda URL
 
 Your WhatsApp message logger is ready! 🎉

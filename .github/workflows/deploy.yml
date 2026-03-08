@@ -1,110 +1,32 @@
-name: Deploy WhatsApp Webhook to AWS Lambda
+name: Deploy
 
 on:
   push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
-  workflow_dispatch: # Allow manual deployment
+    branches: [ main ]
 
 jobs:
   deploy:
-    name: Deploy to AWS Lambda
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
       
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
+    - uses: actions/setup-node@v4
       with:
         node-version: '18'
         cache: 'npm'
         
-    - name: Install Dependencies
-      run: npm ci
+    - run: npm ci
       
-    - name: Run Tests
-      run: npm test
-      
-    - name: Configure AWS Credentials
-      uses: aws-actions/configure-aws-credentials@v4
+    - run: zip -r webhook.zip src/ node_modules/ package.json
+        
+    - uses: aws-actions/configure-aws-credentials@v4
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ap-southeast-1
         
-    - name: Deploy to AWS Lambda
-      run: npm run deploy
-      env:
-        # WhatsApp Business API Configuration
-        WHATSAPP_ACCESS_TOKEN: ${{ secrets.WHATSAPP_ACCESS_TOKEN }}
-        WHATSAPP_VERIFY_TOKEN: ${{ secrets.WHATSAPP_VERIFY_TOKEN }}
-        WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
-        
-        # Business Configuration
-        BUSINESS_HOURS_START: ${{ secrets.BUSINESS_HOURS_START || '09:00' }}
-        BUSINESS_HOURS_END: ${{ secrets.BUSINESS_HOURS_END || '18:00' }}
-        BUSINESS_TIMEZONE: ${{ secrets.BUSINESS_TIMEZONE || 'Asia/Singapore' }}
-        
-        # Feature Configuration
-        ENABLE_HUMAN_HANDOFF: ${{ secrets.ENABLE_HUMAN_HANDOFF || 'true' }}
-        HANDOFF_KEYWORDS: ${{ secrets.HANDOFF_KEYWORDS || 'human,agent,support,help,representative' }}
-        
-        # Company Information
-        COMPANY_NAME: ${{ secrets.COMPANY_NAME || 'Your Company' }}
-        COMPANY_DESCRIPTION: ${{ secrets.COMPANY_DESCRIPTION || 'Customer service provider' }}
-        DEFAULT_GREETING: ${{ secrets.DEFAULT_GREETING || 'Hello! Thank you for contacting us.' }}
-        OUT_OF_HOURS_MESSAGE: ${{ secrets.OUT_OF_HOURS_MESSAGE || 'Thank you for your message! We will respond during business hours.' }}
-        HANDOFF_MESSAGE: ${{ secrets.HANDOFF_MESSAGE || 'Connecting you with a human representative.' }}
-        ACKNOWLEDGMENT_MESSAGE: ${{ secrets.ACKNOWLEDGMENT_MESSAGE || 'Thank you for your message! We have received it and will respond soon.' }}
-        
-    - name: Get Deployment Info
-      run: |
-        echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Region:** ap-southeast-1" >> $GITHUB_STEP_SUMMARY
-        echo "**Service:** whatsapp-ai-webhook" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### Next Steps:" >> $GITHUB_STEP_SUMMARY
-        echo "1. Get your webhook URL from AWS Lambda console" >> $GITHUB_STEP_SUMMARY
-        echo "2. Configure WhatsApp Business API with the webhook URL" >> $GITHUB_STEP_SUMMARY
-        echo "3. Test the webhook with a sample message" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        npx serverless info --region ap-southeast-1 || true
-        
-  test-only:
-    name: Test Only (PR)
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    
-    steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
-      
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
-        
-    - name: Install Dependencies
-      run: npm ci
-      
-    - name: Run Tests
-      run: npm test
-      
-    - name: Run Linting
-      run: npm run lint
-      
-    - name: Add PR Comment
-      uses: actions/github-script@v7
-      with:
-        script: |
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: '✅ Tests passed! Ready for deployment when merged to main branch.'
-          })
+    - run: |
+        aws lambda update-function-code \
+          --function-name "${{ secrets.LAMBDA_FUNCTION_NAME }}" \
+          --zip-file fileb://webhook.zip
