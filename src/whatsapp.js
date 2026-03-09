@@ -1,5 +1,6 @@
 const axios = require('axios');
-const { logger, isBusinessHours, shouldTriggerHandoff, formatPhoneNumber } = require('./utils');
+const { logger, shouldTriggerHandoff, formatPhoneNumber, formatUserError } = require('./utils');
+const { generateGPTReply, clearConversationHistory } = require('./openai');
 
 const WHATSAPP_API_BASE_URL = 'https://graph.facebook.com/v18.0';
 
@@ -97,39 +98,25 @@ async function processIncomingMessage(message, metadata) {
         // Check for human handoff request
         if (shouldTriggerHandoff(messageText)) {
             await sendHandoffMessage(customerPhone);
+            clearConversationHistory(customerPhone);
             return;
         }
 
-        // Check business hours
-        if (!isBusinessHours()) {
-            await sendOutOfHoursMessage(customerPhone);
-            return;
-        }
+        // Generate a GPT reply
+        logger.info('Generating GPT reply', { from: customerPhone });
+        const gptReply = await generateGPTReply(messageText, customerPhone);
 
-        // Log the received message (OpenAI integration deprecated)
-        logger.info('Message received and logged', { 
-            from: customerPhone, 
-            message: messageText,
-            timestamp: new Date().toISOString()
-        });
-        
-        // Send simple acknowledgment message
-        const acknowledgmentMessage = "Thank you for your message! We have received it and will respond soon. For immediate assistance, please type 'human' to speak with our team.";
-        await sendWhatsAppMessage(customerPhone, acknowledgmentMessage);
-        
-        logger.info('Acknowledgment message sent', { 
-            to: customerPhone
-        });
+        await sendWhatsAppMessage(customerPhone, gptReply);
+
+        logger.info('GPT reply sent', { to: customerPhone });
 
     } catch (error) {
         logger.error('Error processing incoming message', error);
         
         // Send error response to user
         try {
-            await sendWhatsAppMessage(
-                message.from,
-                "I apologize, but I'm experiencing technical difficulties. Please try again or contact our support team."
-            );
+            const userMsg = formatUserError(error);
+            await sendWhatsAppMessage(message.from, userMsg);
         } catch (sendError) {
             logger.error('Failed to send error message', sendError);
         }

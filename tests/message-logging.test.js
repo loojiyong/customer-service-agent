@@ -1,93 +1,132 @@
-const { logMessage, getMessageHistory, getMessageStats, clearMessageHistory } = require('../src/openai');
+// Mock the openai module before requiring src/openai
+jest.mock('openai', () => {
+    const mockCreate = jest.fn();
+    return jest.fn().mockImplementation(() => ({
+        chat: {
+            completions: {
+                create: mockCreate
+            }
+        }
+    }));
+});
 
-describe('Message Logging Functions', () => {
+const OpenAI = require('openai');
+
+// Set env vars before requiring the module under test
+process.env.OPENAI_API_KEY = 'test-key';
+process.env.OPENAI_MODEL = 'gpt-4o-mini';
+process.env.COMPANY_NAME = 'Test Company';
+
+const {
+    generateGPTReply,
+    clearConversationHistory,
+    cleanupOldConversations,
+    getConversationStats
+} = require('../src/openai');
+
+describe('GPT Integration (openai.js)', () => {
     const testPhone = '6512345678';
-    const testMessage = 'Hello, this is a test message';
+
+    // Helper: get the mocked `create` function
+    const getMockCreate = () => new OpenAI().chat.completions.create;
 
     beforeEach(() => {
-        // Clear any existing message history before each test
-        clearMessageHistory(testPhone);
+        clearConversationHistory(testPhone);
+        jest.clearAllMocks();
     });
 
     afterEach(() => {
-        // Clean up after each test
-        clearMessageHistory(testPhone);
+        clearConversationHistory(testPhone);
     });
 
-    describe('logMessage', () => {
-        it('should successfully log a message', () => {
-            const result = logMessage(testMessage, testPhone);
-            expect(result).toBe(true);
+    describe('generateGPTReply', () => {
+        it('should return the assistant reply from OpenAI', async () => {
+            getMockCreate().mockResolvedValue({
+                choices: [{ message: { content: 'Hello, how can I help you?' } }],
+                usage: { prompt_tokens: 10, completion_tokens: 8, total_tokens: 18 }
+            });
+
+            const reply = await generateGPTReply('Hi there', testPhone);
+            expect(reply).toBe('Hello, how can I help you?');
         });
 
-        it('should handle empty messages gracefully', () => {
-            const result = logMessage('', testPhone);
-            expect(result).toBe(true);
+        it('should accumulate conversation history across calls', async () => {
+            getMockCreate()
+                .mockResolvedValueOnce({
+                    choices: [{ message: { content: 'First reply' } }],
+                    usage: {}
+                })
+                .mockResolvedValueOnce({
+                    choices: [{ message: { content: 'Second reply' } }],
+                    usage: {}
+                });
+
+            await generateGPTReply('Message one', testPhone);
+            await generateGPTReply('Message two', testPhone);
+
+            // The second call should include the full history
+            const secondCallMessages = getMockCreate().mock.calls[1][0].messages;
+            const roles = secondCallMessages.map(m => m.role);
+            // system, user, assistant (from 1st turn), user (2nd turn)
+            expect(roles).toEqual(['system', 'user', 'assistant', 'user']);
         });
 
-        it('should handle long messages', () => {
-            const longMessage = 'a'.repeat(1000);
-            const result = logMessage(longMessage, testPhone);
-            expect(result).toBe(true);
-        });
-    });
+        it('should throw when OpenAI returns an empty response', async () => {
+            getMockCreate().mockResolvedValue({
+                choices: [{ message: { content: '' } }],
+                usage: {}
+            });
 
-    describe('getMessageHistory', () => {
-        it('should return empty array for new customer', () => {
-            const history = getMessageHistory(testPhone);
-            expect(Array.isArray(history)).toBe(true);
-            expect(history.length).toBe(0);
+            await expect(generateGPTReply('test', testPhone)).rejects.toThrow(
+                'OpenAI returned an empty response'
+            );
         });
 
-        it('should return messages after logging', () => {
-            logMessage(testMessage, testPhone);
-            const history = getMessageHistory(testPhone);
-            
-            expect(history.length).toBe(1);
-            expect(history[0].message).toBe(testMessage);
-            expect(history[0].timestamp).toBeDefined();
-        });
+        it('should include the system prompt with company name', async () => {
+            getMockCreate().mockResolvedValue({
+                choices: [{ message: { content: 'Hi' } }],
+                usage: {}
+            });
 
-        it('should maintain message order', () => {
-            const message1 = 'First message';
-            const message2 = 'Second message';
-            
-            logMessage(message1, testPhone);
-            logMessage(message2, testPhone);
-            
-            const history = getMessageHistory(testPhone);
-            expect(history.length).toBe(2);
-            expect(history[0].message).toBe(message1);
-            expect(history[1].message).toBe(message2);
-        });
-    });
+            await generateGPTReply('Hello', testPhone);
 
-    describe('getMessageStats', () => {
-        it('should return stats object', () => {
-            const stats = getMessageStats();
-            expect(stats).toHaveProperty('activeCustomers');
-            expect(stats).toHaveProperty('messages');
-            expect(Array.isArray(stats.messages)).toBe(true);
-        });
-
-        it('should show correct customer count after logging', () => {
-            logMessage(testMessage, testPhone);
-            const stats = getMessageStats();
-            expect(stats.activeCustomers).toBeGreaterThan(0);
+            const systemMsg = getMockCreate().mock.calls[0][0].messages[0];
+            expect(systemMsg.role).toBe('system');
+            expect(systemMsg.content).toContain('Test Company');
         });
     });
 
-    describe('clearMessageHistory', () => {
-        it('should clear message history for customer', () => {
-            logMessage(testMessage, testPhone);
-            
-            let history = getMessageHistory(testPhone);
-            expect(history.length).toBe(1);
-            
-            clearMessageHistory(testPhone);
-            
-            history = getMessageHistory(testPhone);
-            expect(history.length).toBe(0);
+    describe('clearConversationHistory', () => {
+        it('should reset history so the next call starts fresh', async () => {
+            getMockCreate().mockResolvedValue({
+                choices: [{ message: { content: 'Hi' } }],
+                usage: {}
+            });
+
+            await generateGPTReply('First message', testPhone);
+            clearConversationHistory(testPhone);
+            await generateGPTReply('After clear', testPhone);
+
+            // After clearing, only system + one user message
+            const messages = getMockCreate().mock.calls[1][0].messages;
+            expect(messages.length).toBe(2); // system + user
+        });
+    });
+
+    describe('getConversationStats', () => {
+        it('should return a stats object with activeConversations', () => {
+            const stats = getConversationStats();
+            expect(stats).toHaveProperty('activeConversations');
+            expect(typeof stats.activeConversations).toBe('number');
+            expect(Array.isArray(stats.conversations)).toBe(true);
+        });
+    });
+
+    describe('cleanupOldConversations', () => {
+        it('should return 0 when no stale conversations exist', () => {
+            const cleaned = cleanupOldConversations();
+            expect(typeof cleaned).toBe('number');
+            expect(cleaned).toBeGreaterThanOrEqual(0);
         });
     });
 });

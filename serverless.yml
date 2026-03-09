@@ -11,6 +11,8 @@ provider:
   timeout: 30
   memorySize: 256
   environment:
+    OPENAI_API_KEY: ${env:OPENAI_API_KEY}
+    OPENAI_MODEL: ${env:OPENAI_MODEL, 'gpt-4o-mini'}
     WHATSAPP_ACCESS_TOKEN: ${env:WHATSAPP_ACCESS_TOKEN}
     WHATSAPP_VERIFY_TOKEN: ${env:WHATSAPP_VERIFY_TOKEN}
     WHATSAPP_PHONE_NUMBER_ID: ${env:WHATSAPP_PHONE_NUMBER_ID}
@@ -19,6 +21,8 @@ provider:
     BUSINESS_TIMEZONE: ${env:BUSINESS_TIMEZONE, 'Asia/Singapore'}
     ENABLE_HUMAN_HANDOFF: ${env:ENABLE_HUMAN_HANDOFF, 'true'}
     HANDOFF_KEYWORDS: ${env:HANDOFF_KEYWORDS, 'human,agent,support'}
+    COMPANY_NAME: ${env:COMPANY_NAME, 'Our Company'}
+    COMPANY_DESCRIPTION: ${env:COMPANY_DESCRIPTION, ''}
 
 functions:
   whatsappWebhook:

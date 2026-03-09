@@ -1,121 +1,172 @@
+const OpenAI = require('openai');
 const { logger } = require('./utils');
 
-// OpenAI integration has been deprecated
-// This module now provides simple message logging functionality
+// Lazy-initialised OpenAI client so the module can be imported without a key
+let _client = null;
+function getClient() {
+    if (!_client) {
+        if (!process.env.OPENAI_API_KEY) {
+            throw new Error('OPENAI_API_KEY environment variable is not set');
+        }
+        _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    }
+    return _client;
+}
 
-// Simple in-memory message storage for logging purposes
-const messageLog = new Map();
+// In-memory conversation history per customer phone number
+// Format: Map<phone, { messages: [{role, content}], lastActivity: timestamp }>
+const conversationStore = new Map();
+
+const CONVERSATION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const MAX_HISTORY_MESSAGES = 20; // keep last 20 messages per conversation
 
 /**
- * Log received message (OpenAI integration deprecated)
+ * Build the system prompt from environment variables
  */
-function logMessage(messageText, customerPhone) {
-    try {
-        logger.info('Logging customer message', { 
-            customerPhone,
-            messageText: messageText.substring(0, 100) + (messageText.length > 100 ? '...' : ''),
-            timestamp: new Date().toISOString()
-        });
+function buildSystemPrompt() {
+    const companyName = process.env.COMPANY_NAME || 'Our Company';
+    const companyDescription = process.env.COMPANY_DESCRIPTION || 'a helpful business';
+    const businessHoursStart = process.env.BUSINESS_HOURS_START || '09:00';
+    const businessHoursEnd = process.env.BUSINESS_HOURS_END || '18:00';
+    const timezone = process.env.BUSINESS_TIMEZONE || 'Asia/Singapore';
 
-        // Store message in memory log
-        const customerMessages = messageLog.get(customerPhone) || [];
-        customerMessages.push({
-            message: messageText,
-            timestamp: Date.now()
-        });
-        
-        messageLog.set(customerPhone, customerMessages);
+    return `You are a helpful customer service assistant for ${companyName}. ${companyDescription}
 
-        logger.info('Message logged successfully', { 
-            customerPhone,
-            totalMessages: customerMessages.length
-        });
+Your role is to:
+- Answer customer questions accurately and helpfully
+- Be friendly, professional, and concise (WhatsApp messages should be brief)
+- If you cannot answer something with confidence, suggest the customer speak to a human agent by typing "human"
+- Never make up information about products, prices, or policies you are not certain of
+- Keep responses short and conversational – this is a WhatsApp chat, not an email
 
-        return true;
+Business hours: ${businessHoursStart} – ${businessHoursEnd} ${timezone}.
 
-    } catch (error) {
-        logger.error('Error logging message', {
-            error: error.message,
-            customerPhone,
-            messageText: messageText.substring(0, 50)
-        });
-
-        return false;
-    }
+If asked about your nature, you may say you are an AI assistant for ${companyName}.`;
 }
 
 /**
- * Get message history for a customer
+ * Retrieve and prune conversation history for a customer
  */
-function getMessageHistory(customerPhone) {
-    const messages = messageLog.get(customerPhone);
-    
-    if (!messages) {
+function getConversationHistory(customerPhone) {
+    const now = Date.now();
+    const entry = conversationStore.get(customerPhone);
+
+    if (!entry || now - entry.lastActivity > CONVERSATION_TTL_MS) {
+        // Start fresh
         return [];
     }
 
-    // Clean up old messages (older than 24 hours)
-    const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
-    const recentMessages = messages.filter(msg => msg.timestamp > oneDayAgo);
-    
-    if (recentMessages.length !== messages.length) {
-        messageLog.set(customerPhone, recentMessages);
+    return entry.messages;
+}
+
+/**
+ * Persist an updated message list for a customer
+ */
+function saveConversationHistory(customerPhone, messages) {
+    conversationStore.set(customerPhone, {
+        messages: messages.slice(-MAX_HISTORY_MESSAGES),
+        lastActivity: Date.now()
+    });
+}
+
+/**
+ * Generate a GPT reply for an incoming customer message.
+ * Returns the assistant reply string.
+ */
+async function generateGPTReply(messageText, customerPhone) {
+    const model = process.env.OPENAI_MODEL || 'gpt-5-mini';
+
+    const history = getConversationHistory(customerPhone);
+
+    // Append the new user message
+    const updatedHistory = [...history, { role: 'user', content: messageText }];
+
+    logger.info('Calling OpenAI chat completion', {
+        customerPhone,
+        model,
+        historyLength: history.length,
+        userMessage: messageText.substring(0, 100)
+    });
+
+    const response = await getClient().chat.completions.create({
+        model,
+        messages: [
+            { role: 'system', content: buildSystemPrompt() },
+            ...updatedHistory
+        ],
+        max_completion_tokens: 500
+    });
+
+    logger.info(response)
+
+    const assistantMessage = response.choices[0]?.message?.content?.trim();
+
+    if (!assistantMessage) {
+        throw new Error('OpenAI returned an empty response');
     }
 
-    return recentMessages;
+    logger.info('OpenAI response received', {
+        customerPhone,
+        model,
+        usage: response.usage,
+        replyPreview: assistantMessage.substring(0, 100)
+    });
+
+    // Save full updated history including the assistant reply
+    saveConversationHistory(customerPhone, [
+        ...updatedHistory,
+        { role: 'assistant', content: assistantMessage }
+    ]);
+
+    return assistantMessage;
 }
 
 /**
- * Clear message history (can be called for cleanup)
+ * Clear conversation history for a customer (e.g. after handoff)
  */
-function clearMessageHistory(customerPhone) {
-    messageLog.delete(customerPhone);
-    logger.info('Message history cleared', { customerPhone });
+function clearConversationHistory(customerPhone) {
+    conversationStore.delete(customerPhone);
+    logger.info('Conversation history cleared', { customerPhone });
 }
 
 /**
- * Get message statistics
+ * Remove stale conversations older than TTL
  */
-function getMessageStats() {
+function cleanupOldConversations() {
+    const now = Date.now();
+    let cleaned = 0;
+
+    for (const [phone, entry] of conversationStore.entries()) {
+        if (now - entry.lastActivity > CONVERSATION_TTL_MS) {
+            conversationStore.delete(phone);
+            cleaned++;
+        }
+    }
+
+    if (cleaned > 0) {
+        logger.info(`Cleaned up ${cleaned} stale conversation(s)`);
+    }
+
+    return cleaned;
+}
+
+/**
+ * Conversation statistics
+ */
+function getConversationStats() {
     return {
-        activeCustomers: messageLog.size,
-        messages: Array.from(messageLog.entries()).map(([phone, messages]) => ({
+        activeConversations: conversationStore.size,
+        conversations: Array.from(conversationStore.entries()).map(([phone, entry]) => ({
             phone,
-            messageCount: messages.length,
-            lastMessage: messages[messages.length - 1]?.timestamp
+            messageCount: entry.messages.length,
+            lastActivity: new Date(entry.lastActivity).toISOString()
         }))
     };
 }
 
-/**
- * Cleanup old messages (call periodically)
- */
-function cleanupOldMessages() {
-    const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
-    let cleaned = 0;
-    
-    for (const [phone, messages] of messageLog.entries()) {
-        const recentMessages = messages.filter(msg => msg.timestamp > oneDayAgo);
-        
-        if (recentMessages.length === 0) {
-            messageLog.delete(phone);
-            cleaned++;
-        } else if (recentMessages.length !== messages.length) {
-            messageLog.set(phone, recentMessages);
-        }
-    }
-    
-    if (cleaned > 0) {
-        logger.info(`Cleaned up message history for ${cleaned} customers`);
-    }
-    
-    return cleaned;
-}
-
 module.exports = {
-    logMessage,
-    getMessageHistory,
-    clearMessageHistory,
-    getMessageStats,
-    cleanupOldMessages
+    generateGPTReply,
+    clearConversationHistory,
+    cleanupOldConversations,
+    getConversationStats
 };
