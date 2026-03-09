@@ -206,13 +206,13 @@ async function sendWhatsAppMessage(to, text, options = {}) {
     } catch (error) {
         logger.error('Failed to send WhatsApp message', {
             error: error.message,
-            response: error.response?.data,
+            whatsappError: error.response?.data,
             status: error.response?.status,
             to: to,
             text: text
         });
         
-        throw error;
+        throw new Error(`WhatsApp API ${error.response?.status}: ${JSON.stringify(error.response?.data) || error.message}`);
     }
 }
 

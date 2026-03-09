@@ -16,7 +16,7 @@ jobs:
         node-version: '18'
         cache: 'npm'
         
-    - run: npm ci
+    - run: npm ci --omit=dev
       
     - run: zip -r webhook.zip src/ node_modules/ package.json
         

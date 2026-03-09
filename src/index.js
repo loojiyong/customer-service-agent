@@ -12,19 +12,22 @@ exports.handler = async (event, context) => {
     
     try {
         logger.info('Received webhook request', {
-            method: event.httpMethod,
-            path: event.path,
+            method: event.httpMethod || event.requestContext?.http?.method,
+            path: event.path || event.requestContext?.http?.path,
             queryStringParameters: event.queryStringParameters,
             headers: event.headers
         });
 
+        // Support API Gateway v1 (httpMethod), v2 and Function URLs (requestContext.http.method)
+        const method = event.httpMethod || event.requestContext?.http?.method || '';
+
         // Handle GET request for webhook verification
-        if (event.httpMethod === 'GET') {
+        if (method === 'GET') {
             return await handleWebhookVerification(event);
         }
         
         // Handle POST request for incoming messages
-        if (event.httpMethod === 'POST') {
+        if (method === 'POST') {
             return await handleIncomingMessage(event);
         }
 
@@ -168,9 +171,15 @@ function verifyWebhookSignature(payload, signature) {
         return false;
     }
 
+    const appSecret = process.env.WHATSAPP_APP_SECRET;
+    if (!appSecret) {
+        logger.warn('WHATSAPP_APP_SECRET not set, skipping signature verification');
+        return true;
+    }
+
     try {
         const expectedSignature = 'sha256=' + crypto
-            .createHmac('sha256', process.env.WHATSAPP_ACCESS_TOKEN)
+            .createHmac('sha256', appSecret)
             .update(payload, 'utf8')
             .digest('hex');
 

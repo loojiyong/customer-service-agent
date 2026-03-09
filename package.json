@@ -9,6 +9,7 @@
     "deploy": "serverless deploy --region ap-southeast-1",
     "invoke": "serverless invoke --function whatsappWebhook --region ap-southeast-1",
     "logs": "serverless logs --function whatsappWebhook --region ap-southeast-1",
+    "package": "npm ci --omit=dev && zip -r webhook.zip src/ node_modules/ package.json && echo 'Done: webhook.zip'",
     "test": "jest",
     "lint": "eslint src/",
     "format": "prettier --write src/"
