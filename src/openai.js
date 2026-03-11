@@ -94,7 +94,7 @@ async function generateGPTReply(messageText, customerPhone) {
             { role: 'system', content: buildSystemPrompt() },
             ...updatedHistory
         ],
-        max_completion_tokens: 500
+        max_completion_tokens: parseInt(process.env.OPENAI_MAX_TOKENS || '500', 10)
     });
 
     logger.info(response)
